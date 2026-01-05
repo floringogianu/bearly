@@ -1,3 +1,5 @@
+<p align="center"><img src="img/bearly_logo_512.png" alt="bearly_logo" width="25%" margin="0 auto"/></p>
+
 # beaRLy
 
 Unofficial, unsanctioned and unholy implementation of [rliable](https://github.com/google-research/rliable) for `pandas` tabular data.

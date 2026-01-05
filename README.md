@@ -1,0 +1,148 @@
+# beaRLy
+
+Unofficial, unsanctioned and unholy implementation of [rliable](https://github.com/google-research/rliable) for `pandas` tabular data.
+
+## motivation
+
+`rliable` has long been one of my favorite selection of statistical tools for evaluating RL algorithms and noisy deep learning methods in general.
+
+However, since I am using `pandas` a lot, I found it a bit tiresome to switch between pandas and the array-based API of `rliable` so I reimplemented some of the methods with `pandas`-first in mind.
+
+**Disclaimer:** This is still work in progress, bugs are expected. The reference implementation should remain [rliable](https://github.com/google-research/rliable)!
+
+
+## installation
+
+```bash
+# Core only
+uv pip install git+https://github.com/floringogianu/bearly.git
+
+# Core plus the popular plotting stack
+uv pip install git+https://github.com/floringogianu/bearly.git#[plots]
+
+# Core + plots + development tools
+uv pip install git+https://github.com/floringogianu/bearly.git#[dev]
+```
+
+## functionality (so far)
+
+| Function | Purpose |
+|----------|---------|
+| `get_interval_estimates` | Bootstrap‑based confidence intervals using stratified sampling with replacement |
+| `get_probability_of_improvement` | Estimate the probability that one algorithm beats another |
+| `performance_profile` | **TODO** |
+| `rankings` | **TODO** |
+
+Metrics:
+
+| Function | Purpose |
+|----------|---------|
+| `iqm` | Inter‑quartile mean (robust average) |
+| `optimality_gap` | Quantify how far a set of scores is from the ceiling |
+
+## show me the code!
+
+For complete examples, check the `marimo` [notebook](p9_demo.py) included with the repo.
+
+```python
+import bearly
+import pandas as pd
+
+# load experiments (columns: step, agent, game, trial, (normalised) score)
+df = pd.read_csv("./some_data.csv")
+
+# aggregation functions
+stats = {
+  "iqm":            bearly.iqm,
+  "median":         np.median,
+  "optimality_gap": bearly.optimality_gap
+}
+
+# confidence intervals for IQM and median 
+ci = bearly.get_interval_estimates(
+    df,
+    stats,
+    metric="score",
+    strata="game",
+    group=["agent", "step"],
+    n_bootstrap=2_000,
+)
+```
+
+Will return a DataFrame containing confidence intervals for each agent, at every step, using each statistical estimator in `stats`.
+
+With it you can then plot **sample efficiency curves**:
+
+![Sample Efficiency Curves](img/sample_efficiency.png)
+
+*Shows how the mean human normalised score (HNS) of each agent evolves over training steps. 95% confidence intervals shows the sensitivity of the aggregate if we were to use a larger number of trials per task (training runs per game).*
+
+---
+
+```python
+# get the final scores
+ci_final = ci.groupby(["agent", "stat_fn"]).tail(1)
+```
+
+With it we can then plot **final score estimates**:
+
+![Final Performance Comparison](img/final_performance.png)
+
+*Cross‑bar plot of final HNS estimates for each agent, with 95 % confidence intervals.*
+
+---
+
+We can also compute the **probability of improvement** over some baseline:
+
+```python
+# get the final scores
+df_final = df.groupby(["agent", "game", "trial"]).tail(1).reset_index()
+
+# probability that Rainbow beats DQN on final step
+p_rainbow_vs_dqn = get_probability_of_improvement(
+    df_final,
+    compared=("agent", "Rainbow", "DQN"),
+    strata="game",
+    metric="hns",
+    n_bootstrap=2_000,
+)
+```
+
+<img src="img/probability_of_improvement.png" alt="Probability of Improvement" width="50%"/>
+
+*Cross‑bar visualisation of the probability that one algorithm outperforms another on aggregate. The y‑axis shows the estimated probability (`p(Y > X)`), while the bars encode the 95 % confidence interval around this estimate.*
+
+### supervised learning
+
+`beaRLy` is not restricted to evaluating RL algorithms! Whenever you have a fairly stochastic algorithm you want to evaluate in aggregate over a distribution of tasks, you can use the same tools: 
+
+```python
+
+# load results (columns: epoch, model, dataset, trial, val_acc)
+df = pd.read_csv("not_rl_results.csv")
+
+ci = get_interval_estimates(
+    df,
+    stats,
+    metric="val_acc",
+    strata="dataset",
+    group=["model", "epoch"],
+    n_bootstrap=2_000,
+)
+
+# probability that ResNet beats LeNet on the last epoch
+df_final = df.groupby(["model", "dataset", "trial"]).tail(1).reset_index()
+p_resnet_vs_lenet = get_probability_of_improvement(
+    df_final,
+    ("model", "ResNet", "LeNet"),
+    strata="dataset",
+    metric="val_acc",
+    n_bootstrap=2_000,
+)
+```
+
+## credits
+- [rliable](https://github.com/google-research/rliable) – original statistical framework for RL evaluation.
+- [plotnine](https://github.com/has2k1/plotnine) – ggplot‑style charting for Python.
+- [marimo](https://github.com/marimo-team/marimo) – interactive notebook framework.
+- Python ecosystem (pandas, numpy, scipy) – essential data‑science stack.

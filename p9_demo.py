@@ -7,28 +7,16 @@ app = marimo.App(width="columns")
 @app.cell
 def _():
     import marimo as mo
+
+    from functools import partial
+
+    import bearly as brly
     import numpy as np
     import pandas as pd
     import plotnine as p9
 
-    from bearly import (
-        get_interval_estimates,
-        get_probability_of_improvement,
-        iqm,
-        min_max_normalisation,
-        optimality_gap,
-    )
-    return (
-        get_interval_estimates,
-        get_probability_of_improvement,
-        iqm,
-        min_max_normalisation,
-        mo,
-        np,
-        optimality_gap,
-        p9,
-        pd,
-    )
+    from scipy.stats import trim_mean
+    return brly, mo, p9, partial, pd, trim_mean
 
 
 @app.cell
@@ -38,14 +26,14 @@ def _(p9):
 
 
 @app.cell
-def _(min_max_normalisation, pd):
+def _(brly, pd):
     mnmx = pd.read_csv("./data/ale_57_mnmx.csv", thousands=",").set_index("rom")
     mnmx = mnmx.rename(columns={"mn": "min", "mx": "max"})
 
     dpmn = pd.read_feather("./data/dopamine.feather.lz4")
     dpmn = dpmn.loc[dpmn["rom"].isin(mnmx.index.unique())].reset_index(drop=True)
 
-    dpmn["hns"] = min_max_normalisation(dpmn, mnmx, "rom", "return")
+    dpmn["hns"] = brly.min_max_normalisation(dpmn, mnmx, "rom", "return")
     dpmn = dpmn[["step", "agent", "model", "rom", "trial", "return", "hns"]]
 
     # subsample
@@ -68,10 +56,10 @@ def _(dpmn):
 
 
 @app.cell
-def _(dpmn, iqm, p9):
+def _(dpmn, p9, trim_mean):
     (
         p9.ggplot(dpmn, p9.aes(x="step", y="hns", color="agent"))
-        + p9.stat_summary(geom="line", fun_y=iqm, size=1)
+        + p9.stat_summary(geom="line", fun_y=lambda x: trim_mean(x, 0.25, None), size=1)
         + p9.facet_wrap("model", ncol=5, labeller="label_context")
         + p9.labs(
             y="episodict return (average over seeds)",
@@ -81,10 +69,10 @@ def _(dpmn, iqm, p9):
         )
         + p9.theme(
             figure_size=(9, 3),
-            # legend_position="top",
-            # legend_direction="horizontal",
             axis_text_x=p9.element_text(rotation=35),
             strip_background=p9.themes.elements.element_blank(),
+            # legend_position="top",
+            # legend_direction="horizontal",
         )
     ).draw()
     return
@@ -98,12 +86,12 @@ def _(dpmn):
 
 
 @app.cell
-def _(iqm, np, optimality_gap):
+def _(brly):
     stat_fns = {
-        "iqm": iqm,
-        "median": np.median,
-        "mean": np.mean,
-        "optimality gap": optimality_gap,
+        "iqm": brly.iqm,
+        "median": brly.median,
+        "mean": brly.mean,
+        "optimality gap": brly.optimality_gap,
     }
     return (stat_fns,)
 
@@ -117,12 +105,15 @@ def _(mo):
 
 
 @app.cell
-def _(cnn, get_interval_estimates, stat_fns):
-    # stratified bootstrapping over each (agent, step) combination, # where "rom"
-    # (game) is the strata and "hns" is the metric we care about (here, the human
-    # normalised score).
-    ci = get_interval_estimates(cnn, stat_fns, "hns", "rom", ["agent", "step"], 2_000)
-    ci
+def _(brly, cnn, partial, pd, stat_fns):
+    ci_fn = partial(
+        brly.get_interval_estimates,
+        df=cnn,
+        metric_col="hns",
+        task_col="rom",
+        group_cols=["agent", "step"],
+    )
+    ci = pd.concat([ci_fn(stat=(k, f)) for k, f in stat_fns.items()], ignore_index=True)
     return (ci,)
 
 
@@ -130,7 +121,7 @@ def _(cnn, get_interval_estimates, stat_fns):
 def _(ci, p9):
     sample_efficiency = (
         p9.ggplot(
-            ci.loc[ci["stat_fn"] != "optimality gap"],
+            ci.loc[~ci["stat_fn"].isin(["optimality gap"])],
             p9.aes(x="step", y="y", color="agent", fill="agent"),
         )
         + p9.geom_line(size=0.75)
@@ -138,8 +129,11 @@ def _(ci, p9):
         + p9.geom_ribbon(p9.aes(ymax="ymax", ymin="ymin"), alpha=0.2, linetype="")
         + p9.facet_wrap("~stat_fn", scales="free_y")
         + p9.labs(
-            y="human normalised score", x="frames (M)", color="agent:", fill="agent:",
-            subtitle="sample efficiency curves (Impala estimator)"
+            y="human normalised score",
+            x="frames (M)",
+            color="agent:",
+            fill="agent:",
+            subtitle="sample efficiency curves (Impala estimator)",
         )
         + p9.theme(
             figure_size=(9, 3),
@@ -178,7 +172,10 @@ def _(ci, p9):
             legend_position="none",
             strip_background=p9.themes.elements.element_blank(),
         )
-        + p9.labs(y="human normalised score", subtitle="final score estimates and 95% confidence intervals")
+        + p9.labs(
+            y="human normalised score",
+            subtitle="final score estimates and 95% confidence intervals",
+        )
     )
 
     final_performance.save("./img/final_performance.png", dpi=320)
@@ -202,15 +199,20 @@ def _(cnn):
 
 
 @app.cell
-def _(cnn_final, get_probability_of_improvement, pd):
+def _(brly, cnn_final, pd):
     # using DQN as a baseline
     # it takes a while, don't worry :)
     pis = []
     for agent in ["C51", "IQN", "Rainbow", "QR-DQN"]:
-        print(f"computing p({agent} > DQN)")
+        # print(f"computing p({agent} > DQN)")
         pis.append(
-            get_probability_of_improvement(
-                cnn_final, ("agent", agent, "DQN"), "rom", "hns", 2000
+            brly.get_paired_interval_estimates(
+                cnn_final,
+                ("agent", agent, "DQN"),
+                "rom",
+                "hns",
+                ("p_improve", brly.probability_of_improvement),
+                2000,
             )
         )
     pis = pd.concat(pis, ignore_index=True)
@@ -243,6 +245,11 @@ def _(p9, pis):
 
     probability_of_improvement.save("./img/probability_of_improvement.png", dpi=320)
     probability_of_improvement.draw()
+    return
+
+
+@app.cell
+def _():
     return
 
 

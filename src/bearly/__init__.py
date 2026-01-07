@@ -1,17 +1,17 @@
 from .core import (
     get_interval_estimates,
-    get_probability_of_improvement,
-    stratified_sampling_with_replacement,
+    get_paired_interval_estimates,
 )
-from .metric import iqm, optimality_gap, probability_of_improvement
 from .proc import min_max_normalisation
+from .stat import iqm, mean, median, optimality_gap, probability_of_improvement
 
 __all__ = (
     "get_interval_estimates",
-    "get_probability_of_improvement",
-    "stratified_sampling_with_replacement",
+    "get_paired_interval_estimates",
     # metrics
     "iqm",
+    "mean",
+    "median",
     "optimality_gap",
     "probability_of_improvement",
     # utils

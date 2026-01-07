@@ -1,173 +1,250 @@
-from typing import Callable
+from dataclasses import dataclass
 
 import numpy as np
-from pandas import DataFrame, concat
+import pandas as pd
+from tqdm import tqdm
 
-from .metric import probability_of_improvement
+from .stat import AggregateStat, PairedStat, Tasks
 
 __all__ = (
     "get_interval_estimates",
-    "get_probability_of_improvement",
-    "stratified_sampling_with_replacement",
+    "get_paired_interval_estimates",
+    # "stratified_sampling_with_replacement",
 )
 
 
-def stratified_sampling_with_replacement(
-    df: DataFrame,
-    measurement_col: str,
-    strata_col: str,
-    group_cols: list[str],
-    repeats: int,
-) -> DataFrame:
-    """Stratified sampling. Allows for resampling even when the number of
-    measurements for each `strata_col` (task) varies.
+@dataclass(slots=True)
+class BootAggregate:
+    point_estimate: float
+    ci_lower: float
+    ci_upper: float
 
-    Args:
-        df (DataFrame): ...
-        measurement_col (str): the column containing the signal we want to
-            resample.
-        strata_col (str): for each value in this column we sample with
-            replacement N times, where N is the number of measurements for each
-            `strata_col`.
-        group_cols (list[str]): columns for which we *independently* apply this
-            sampling procedure.
-        repeats (int): number of times the sampling procedure is repeated. In
-            total `repeats x len(measurements)` will be drawn.
 
-    Returns:
-        DataFrame: with a `sample` column in addition to the existing columns.
+def _generate_stratified_bootstrap(data: Tasks, rng: np.random.Generator) -> Tasks:
+    """Resamples runs within each Task with replacement."""
+    resampled_data = []
+    for task_runs in data:
+        n = len(task_runs)
+        indices = rng.integers(0, n, size=n)
+        resampled_data.append(task_runs[indices])
+    return resampled_data
 
-    Example:
-        `metric, task, [checkpoint]`,
-        `acc, dataset, [epoch]`,
-        `hns, game, [step]`
-    """
-    _df = df.sort_values([strata_col, *group_cols])
-    # _df = _df[[strata_col, *group_cols, measurement_col]].copy()
 
-    grouped = _df.groupby([strata_col, *group_cols], sort=False)
-    group_counts = grouped.size().to_numpy()
-    group_starts = np.insert(np.cumsum(group_counts)[:-1], 0, 0)
-    indices_list = []
-    sample_ids_list = []
+def _compute_interval_estimates(
+    data: Tasks,
+    metric_fn: AggregateStat,
+    n_samples: int = 2000,
+    confidence: float = 0.95,
+) -> BootAggregate:
+    rng = np.random.default_rng()
 
-    for start, count in zip(group_starts, group_counts):
-        if count == 0:
-            continue
-        rand_offsets = np.random.randint(0, count, size=count * repeats)
-        indices_list.append(start + rand_offsets)
-        ids = np.repeat(np.arange(repeats), count)
-        sample_ids_list.append(ids)
+    # TODO: can this be faster?
+    boot_estimates = np.array(
+        [metric_fn(_generate_stratified_bootstrap(data, rng)) for _ in range(n_samples)]
+    )
 
-    all_indices = np.concatenate(indices_list)
-    all_sample_ids = np.concatenate(sample_ids_list)
+    alpha = (1.0 - confidence) / 2.0
+    lower = np.quantile(boot_estimates, alpha)
+    upper = np.quantile(boot_estimates, 1.0 - alpha)
 
-    smpls = _df.iloc[all_indices].copy()
-    smpls["sample"] = all_sample_ids
-    return smpls
+    point_estimate = metric_fn(data)
+
+    return BootAggregate(point_estimate, lower, upper)
 
 
 def get_interval_estimates(
-    df: DataFrame,
-    stat_fn: Callable | dict[str, Callable],
-    metric: str,
-    strata: str,
-    group: list[str],
-    n_samples: int = 1_000,
-):
-    """Uses stratified sampling to compute aggregate statistics and confidence
-    intervals.
+    df: pd.DataFrame,
+    stat: AggregateStat | tuple["str", AggregateStat],
+    metric_col: str,
+    task_col: str,
+    group_cols: list[str],
+    n_samples: int = 2000,
+    confidence: float = 0.95,
+) -> pd.DataFrame:
+    """Uses stratified sampling over tasks to compute aggregates and confidence
+    intervals using variouse statistical estimates.
+
+    How it works:
+        1. groups by `group_cols`.
+        2. converts each group into `Tasks` (`list[np.ndarray]`).
+        3. runs the bootstrap.
+        4. returns a DataFrame with CIs.
+
+    Args:
+        df: tabular data with columns containing:
+
+                - algorithms such as agents or models,
+                - tasks such as games or datasets,
+                - normalised_values such as accuracy, returns, etc.
+
+            Optionaly, it can also contain columns such as:
+
+                - ticks, suchs as steps or epochs
+                - hyperparameters over which to group by
+
+            !! We assume at least a column to be grouped over (such as
+            algorithms or ticks).
+            TODO: Maybe relax on this assumption?
+
+        stat:       function (and its name) used for aggregating over runs and tasks.
+        metric_col: column which contains the evaluations, eg.: `hns`, `val_acc`, etc.
+        task_col:   column which contains the tasks, eg.: `game`, `dataset`, etc.
+        group_cols: list of columns over which we want to apply this function
+            independently, eg.: [`agent`, `step`] or [`model`, `epoch`].
+        n_samples:  how many times we apply the procedure of sampling measurements of tasks.
+        confidence: confidence interval value
+
+    Returns:
+        DataFrame: containing y, ymin, ymax, stat_fn
     """
+    fname, stat = stat if isinstance(stat, tuple) else (stat.__name__, stat)
+    results = []
 
-    samples = stratified_sampling_with_replacement(df, metric, strata, group, n_samples)
+    # group by the high-level identifiers (e.g., algorithm, checkpoint)
+    grouped = df.groupby(group_cols)
 
-    stat_fns = stat_fn if isinstance(stat_fn, dict) else {"stat_fn": stat_fn}
+    for group_keys, sub_df in tqdm(grouped, f"{fname:<16s}"):
+        # handle single vs multiple group columns
+        if not isinstance(group_keys, tuple):
+            group_keys = (group_keys,)
 
-    res = []
-    for stat_name, f in stat_fns.items():
-        # compute bootstrap statistics
-        ci = (
-            samples.groupby([*group, "sample"])[metric]
-            .apply(f)
-            .reset_index()
-            .groupby(group)[metric]
-            .agg([lambda x: x.quantile(0.025), lambda x: x.quantile(0.975)])
+        # convert DataFrame to Tasks
+        # sort by task to ensure deterministic ordering
+        sub_df = sub_df.sort_values(task_col)
+
+        # result is [Array(Run1, Run2...), Array(Run1...), ...]
+        task_groups = sub_df.groupby(task_col, sort=False)[metric_col]
+        benchmark_data: Tasks = [vals.to_numpy() for _, vals in task_groups]
+
+        # 3. Call the Fast Pure Function
+        stats = _compute_interval_estimates(
+            benchmark_data, stat, n_samples=n_samples, confidence=confidence
         )
 
-        # rename columns
-        ci.columns = ["ymin", "ymax"]
-        ci = ci.reset_index()
+        # 4. Reconstruct Result Row
+        row = dict(zip(group_cols, group_keys))
+        row.update(
+            {
+                "y": stats.point_estimate,
+                "ymin": stats.ci_lower,
+                "ymax": stats.ci_upper,
+                "stat_fn": fname,
+            }
+        )
+        results.append(row)
 
-        # add point estimates
-        pe = df.groupby(group)[metric].apply(f).rename("y").reset_index()
-        ci = ci.merge(pe, on=group, how="left")
-
-        # add aggregation statistic name
-        ci["stat_fn"] = stat_name
-        res.append(ci)
-
-    return concat(res, ignore_index=True)
+    return pd.DataFrame(results)
 
 
-def get_probability_of_improvement(
-    df: DataFrame,
+def _compute_paired_estimates(
+    baseline,
+    other,
+    stat_fn: PairedStat,
+    n_samples: int = 2000,
+    confidence: float = 0.95,
+    pair_name: str = "",
+) -> BootAggregate:
+    """Compute estimate on paired identifiers, such as two algorithms using a
+    paired aggregation function. For example, the probability of improvement.
+    """
+    rng = np.random.default_rng()
+
+    estimates = []
+
+    for _ in tqdm(range(n_samples), f"{pair_name:<16s}"):
+        # generate independent new bootstrap samples for both
+        # TODO: think wether we would want to have the same indices for paired
+        # seeds.
+        boot_base = _generate_stratified_bootstrap(baseline, rng)
+        boot_new = _generate_stratified_bootstrap(other, rng)
+
+        # compute the stat on the resampled pair
+        estimates.append(stat_fn(boot_base, boot_new))
+
+    # percentiles
+    boot_estimates = np.array(estimates)
+    alpha = (1.0 - confidence) / 2.0
+    lower = np.quantile(boot_estimates, alpha)
+    upper = np.quantile(boot_estimates, 1.0 - alpha)
+    # point estimate
+    point_estimate = stat_fn(baseline, other)
+
+    return BootAggregate(point_estimate, lower, upper)
+
+
+def get_paired_interval_estimates(
+    df: pd.DataFrame,
     compared: tuple[str, str, str],
-    strata: str,
-    metric: str,
-    n_samples: int = 1_000,
-) -> DataFrame:
+    task_col: str,
+    metric_col: str,
+    stat: PairedStat | tuple["str", PairedStat],
+    n_samples: int = 2000,
+    confidence: float = 0.95,
+) -> pd.DataFrame:
     """Uses stratified sampling to compute probability of improvement of two
     algorithms.
 
     Args:
-        df (DataFrame): a DataFrame ...
-        compared (tuple[str,str,str]): a tuple specifying the column and the
+        df: tabular data with columns containing:
+
+            - algorithms such as agents or models,
+            - tasks such as games or datasets,
+            - normalised_values such as accuracy, returns, etc.
+
+        compared: a tuple specifying the column and the
             algorithms compared, eg.: (algo, quicksort, bubblesort)
-        strata (str): column of tasks
-        metric (str): column of values for which we compute the stats
+        task_col: column of tasks
+        metric_col: column of values for which we compute the stats
 
     Returns:
         DataFrame: containing columns [pair, y, ymin, ymax]
     """
 
-    col, x, y = compared
+    algo_col, baseline_algo, other_algo = compared
+    fname, stat = stat if isinstance(stat, tuple) else (stat.__name__, stat)
 
-    # filter
-    df = df.loc[df[col].isin([x, y])].reset_index(drop=True)
+    # filter the two algorithms
+    df_base = df[df[algo_col] == baseline_algo]
+    df_other = df[df[algo_col] == other_algo]
 
-    # stratified sampling
-    samples = stratified_sampling_with_replacement(df, metric, strata, [col], n_samples)
+    # intersection of tasks (Alignment)
+    # TODO: we need some asserts or warnings here!!
+    base_task_set = np.unique(df_base[task_col])
+    other_task_set = np.unique(df_other[task_col])
+    common_tasks = sorted(list(set(base_task_set) & set(other_task_set)))
 
-    # algo A and algo B scores in separate columns
-    pairs = samples.pivot_table(
-        index=["sample", strata],
-        columns=col,
-        values=metric,
-        aggfunc=list,  # bundle all runs for a specific (sample, task) into one cell
-    ).dropna()
+    if not common_tasks:
+        raise ValueError(
+            f"No common tasks found between {baseline_algo} and {other_algo}"
+        )
 
-    # the `probability_of_improvement` function receives raw lists
-    pi_per_task_boot = pairs.apply(
-        lambda row: probability_of_improvement(row[x], row[y]), axis=1
+    # convert to Tasks -> (list[Trials])
+    base_tasks: Tasks = []
+    other_tasks: Tasks = []
+    grouped_base = df_base.groupby(task_col)
+    grouped_new = df_other.groupby(task_col)
+
+    for task in common_tasks:
+        base_tasks.append(grouped_base.get_group(task)[metric_col].to_numpy())
+        other_tasks.append(grouped_new.get_group(task)[metric_col].to_numpy())
+
+    # compute the bootstrapped paired stats
+    result: BootAggregate = _compute_paired_estimates(
+        baseline=base_tasks,
+        other=other_tasks,
+        stat_fn=stat,
+        n_samples=n_samples,
+        confidence=confidence,
+        pair_name=f"p({other_algo} > {baseline_algo})",
     )
 
-    # mean over p(x>y | task), then quantiles over bootstrap samples
-    pi_boot = pi_per_task_boot.groupby("sample").mean()
-
-    # p(x>y) estimate
-    pi_mean = (
-        df.pivot_table(index=[strata], columns=col, values=metric, aggfunc=list)
-        .dropna()
-        .apply(lambda row: probability_of_improvement(row[x], row[y]), axis=1)
-        .mean()
-    )
-
-    return DataFrame(
+    return pd.DataFrame(
         {
-            "X": [x],
-            "Y": [y],
-            "y": [pi_mean],
-            "ymin": [pi_boot.quantile(0.025)],
-            "ymax": [pi_boot.quantile(0.975)],
+            "X": [baseline_algo],
+            "Y": [other_algo],
+            "y": [result.point_estimate],
+            "ymin": [result.ci_lower],
+            "ymax": [result.ci_upper],
+            "stat_fn": [fname],
         }
     )

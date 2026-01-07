@@ -31,7 +31,7 @@ uv pip install git+https://github.com/floringogianu/bearly.git#[dev]
 | Function | Purpose |
 |----------|---------|
 | `get_interval_estimates` | Bootstrap‑based confidence intervals using stratified sampling with replacement |
-| `get_probability_of_improvement` | Estimate the probability that one algorithm beats another |
+| `get_paired_interval_estimates` | Estimate the probability that one algorithm beats another |
 | `performance_profile` | **TODO** |
 | `rankings` | **TODO** |
 
@@ -64,10 +64,10 @@ stats = {
 ci = bearly.get_interval_estimates(
     df,
     stats,
-    metric="score",
-    strata="game",
-    group=["agent", "step"],
-    n_bootstrap=2_000,
+    metric_col="score",
+    task_col="game",
+    group_cols=["agent", "step"],
+    n_samples=2_000,
 )
 ```
 
@@ -101,12 +101,12 @@ We can also compute the **probability of improvement** over some baseline:
 df_final = df.groupby(["agent", "game", "trial"]).tail(1).reset_index()
 
 # probability that Rainbow beats DQN on final step
-p_rainbow_vs_dqn = get_probability_of_improvement(
+p_rainbow_vs_dqn = bearly.get_paired_interval_estimates(
     df_final,
     compared=("agent", "Rainbow", "DQN"),
-    strata="game",
-    metric="hns",
-    n_bootstrap=2_000,
+    task_col="game",
+    metric_col="hns",
+    n_samples=2_000,
 )
 ```
 
@@ -123,23 +123,23 @@ p_rainbow_vs_dqn = get_probability_of_improvement(
 # load results (columns: epoch, model, dataset, trial, val_acc)
 df = pd.read_csv("not_rl_results.csv")
 
-ci = get_interval_estimates(
+ci = bearly.get_interval_estimates(
     df,
     stats,
-    metric="val_acc",
-    strata="dataset",
-    group=["model", "epoch"],
-    n_bootstrap=2_000,
+    metric_col="val_acc",
+    task_col="dataset",
+    group_cols=["model", "epoch"],
+    n_samples=2_000,
 )
 
 # probability that ResNet beats LeNet on the last epoch
 df_final = df.groupby(["model", "dataset", "trial"]).tail(1).reset_index()
-p_resnet_vs_lenet = get_probability_of_improvement(
+p_resnet_vs_lenet = bearly.get_paired_interval_estimates(
     df_final,
-    ("model", "ResNet", "LeNet"),
-    strata="dataset",
-    metric="val_acc",
-    n_bootstrap=2_000,
+    compared=("model", "ResNet", "LeNet"),
+    task_col="dataset",
+    metric_col="val_acc",
+    n_samples=2_000,
 )
 ```
 

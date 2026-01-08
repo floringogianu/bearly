@@ -6,17 +6,18 @@ app = marimo.App(width="columns")
 
 @app.cell
 def _():
-    import marimo as mo
-
     from functools import partial
 
-    import bearly as brly
+    import marimo as mo
     import numpy as np
     import pandas as pd
     import plotnine as p9
-
     from scipy.stats import trim_mean
-    return brly, mo, p9, partial, pd, trim_mean
+
+    import bearly as brly
+    return brly, mo, np, p9, partial, pd, trim_mean
+
+    return brly, mo, np, p9, partial, pd, trim_mean
 
 
 @app.cell
@@ -168,7 +169,7 @@ def _(ci, p9):
         + p9.coord_flip()
         + p9.facet_wrap("~stat_fn", ncol=4, scales="free_x")
         + p9.theme(
-            figure_size=(9, 2.5),
+            figure_size=(9, 2),
             legend_position="none",
             strip_background=p9.themes.elements.element_blank(),
         )
@@ -239,8 +240,9 @@ def _(p9, pis):
             strip_background=p9.themes.elements.element_blank(),
         )
         + p9.labs(
-            x="algorithm Y", y="p(Y > DQN)", subtitle="probability of improvement over DQN"
-        )
+            x="algorithm Y",
+            y="p(Y > DQN)",
+            subtitle="probability of improvement over DQN",
     )
 
     probability_of_improvement.save("./img/probability_of_improvement.png", dpi=320)
@@ -249,7 +251,53 @@ def _(p9, pis):
 
 
 @app.cell
-def _():
+def _(brly, cnn_final, np):
+    max_avg_hns = np.ceil(cnn_final.groupby(["agent"])["hns"].mean().max())
+
+    pp = brly.get_performance_profiles(
+        cnn_final,
+        tau_values=np.linspace(0, max_avg_hns, 101),
+        metric_col="hns",
+        task_col="rom",
+        group_cols=["agent"],
+    )
+    pp
+    return (pp,)
+
+
+@app.cell
+def _(p9, pp):
+    performance_profiles = (
+        p9.ggplot(pp.reset_index(), p9.aes(x="tau", y="y", color="agent", fill="agent"))
+        + p9.geom_line(size=0.75)
+        + p9.geom_ribbon(p9.aes(ymax="ymax", ymin="ymin"), alpha=0.2, linetype="")
+        + p9.coord_cartesian(ylim=(0, 1.0))
+        + p9.geom_hline(yintercept=0.5, linetype="dotted", size=0.6)
+        + p9.annotate(
+            "text",
+            x=12,
+            y=0.54,
+            label="median",
+            color="grey",
+            size=8,
+            ha="right",
+            # nudge_x=0.5
+        )
+        + p9.labs(
+            y=r"fraction of runs with score > $\tau$",
+            x=r"human normalised score ($\tau$)",
+            color="agent:",
+            fill="agent:",
+            subtitle="performance profiles",
+        )
+        + p9.theme(
+            figure_size=(5, 3),
+            strip_background=p9.themes.elements.element_blank(),
+        )
+    )
+
+    performance_profiles.save("./img/performance_profiles.png", dpi=320)
+    performance_profiles.draw()
     return
 
 

@@ -3,26 +3,49 @@ where g an h can be the same function or the function is applied to all runs x
 tasks measurements.
 """
 
-from typing import Annotated, Protocol
+from dataclasses import dataclass
+from functools import partial
+from typing import Annotated, Generic, Literal, Protocol, TypeVar, runtime_checkable
 
 import numpy as np
 from scipy.stats import mannwhitneyu, trim_mean
 
-__all__ = ("iqm", "mean", "median", "optimality_gap", "probability_of_improvement")
+__all__ = (
+    "iqm",
+    "mean",
+    "median",
+    "optimality_gap",
+    "probability_of_improvement",
+    "set_performance_at_tau_stat",
+)
 
 
 # domain types
-
+R = TypeVar("R", bound=float | np.ndarray, covariant=True)
 type Trials = Annotated[np.ndarray, "Shape: (N,)"]  # one datapoint per task over trials
 type Tasks = list[Trials]  # an aggregate of many tasks and their trials
 
 
-class AggregateStat(Protocol):
-    def __call__(self, data: Tasks) -> float: ...
+@runtime_checkable
+class AggregateStat(Protocol[R]):
+    def __call__(self, data: Tasks) -> R: ...
 
 
 class PairedStat(Protocol):
     def __call__(self, baseline: Tasks, Y: Tasks) -> float: ...
+
+
+# and container objects
+
+
+@dataclass(slots=True)
+class BootAggregate(Generic[R]):
+    point_estimate: R
+    ci_lower: R
+    ci_upper: R
+
+
+# finally, the statistical estimators
 
 
 def mean(data: Tasks) -> float:
@@ -73,3 +96,31 @@ def probability_of_improvement(baseline: Tasks, Y: Tasks) -> float:
         task_probs.append(prob)
 
     return float(np.mean(task_probs))
+
+
+def set_performance_at_tau_stat(
+    taus: np.ndarray,
+    deviation: Literal["run_score", "mean_score"],
+) -> AggregateStat[np.ndarray]:
+    """Configures a performance@tau estimator based on deviation type. It does
+    partial application of the τ list to preserve the signature of
+    AggregateStat.
+
+    Importantly, it returns an AggregateStat[np.ndarray], unlike most of the
+    other stats here which are AggregateStat[float].
+    """
+
+    def _run_score_deviation(data: Tasks, tau: float) -> float:
+        """Average of how many scores are above τ."""
+        scores = np.concatenate(data)
+        return np.mean(scores > tau)
+
+    def _mean_score_deviation(data: Tasks, tau: float) -> float:
+        """Average of how many task averages are above τ."""
+        task_scores = np.concatenate([np.mean(task) for task in data])
+        return np.mean(task_scores > tau)
+
+    if deviation == "run_score":
+        return partial(np.vectorize(_run_score_deviation, excluded=[0]), tau=taus)
+    elif deviation == "mean_score":
+        return partial(np.vectorize(_mean_score_deviation, excluded=[0]), tau=taus)

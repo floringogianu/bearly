@@ -10,6 +10,8 @@ Unofficial, unsanctioned and unholy implementation of [rliable](https://github.c
 
 However, since I am using `pandas` a lot, I found it a bit tiresome to switch between pandas and the array-based API of `rliable` so I reimplemented some of the methods with `pandas`-first in mind.
 
+Furthermore, the core library only depends on `numpy` and two methods from `scipy`.
+
 **Disclaimer:** This is still work in progress, bugs are expected. The reference implementation should remain [rliable](https://github.com/google-research/rliable)!
 
 
@@ -32,15 +34,22 @@ uv pip install git+https://github.com/floringogianu/bearly.git#[dev]
 |----------|---------|
 | `get_interval_estimates` | Bootstrap‑based confidence intervals using stratified sampling with replacement |
 | `get_paired_interval_estimates` | Estimate the probability that one algorithm beats another |
-| `performance_profile` | **TODO** |
-| `rankings` | **TODO** |
+| `performance_profile` | The fraction of tasks that reach performance τ or higher for a range of tau values |
 
 Metrics:
 
 | Function | Purpose |
 |----------|---------|
 | `iqm` | Inter‑quartile mean (robust average) |
+| `mean` | Average of task averages |
+| `median` | Median of task averages |
+| `iqm` | Inter‑quartile mean (robust average) |
 | `optimality_gap` | Quantify how far a set of scores is from the ceiling |
+
+### missing:
+- [ ] bootstrapping over tasks and runs
+- [ ] ranking plots
+
 
 ## show me the code!
 
@@ -53,17 +62,10 @@ import pandas as pd
 # load experiments (columns: step, agent, game, trial, (normalised) score)
 df = pd.read_csv("./some_data.csv")
 
-# aggregation functions
-stats = {
-  "iqm":            bearly.iqm,
-  "median":         np.median,
-  "optimality_gap": bearly.optimality_gap
-}
-
-# confidence intervals for IQM and median 
+# confidence intervals for IQM
 ci = bearly.get_interval_estimates(
     df,
-    stats,
+    ("iqm", bearly.iqm),
     metric_col="score",
     task_col="game",
     group_cols=["agent", "step"],
@@ -71,7 +73,7 @@ ci = bearly.get_interval_estimates(
 )
 ```
 
-Will return a DataFrame containing confidence intervals for each agent, at every step, using each statistical estimator in `stats`.
+Will return a DataFrame containing confidence intervals for each agent, at every step.
 
 With it you can then plot **sample efficiency curves**:
 
@@ -114,6 +116,27 @@ p_rainbow_vs_dqn = bearly.get_paired_interval_estimates(
 
 *Cross‑bar visualisation of the probability that one algorithm outperforms another on aggregate. The y‑axis shows the estimated probability (`p(Y > X)`), while the bars encode the 95 % confidence interval around this estimate.*
 
+
+---
+
+Performance profiles:
+
+```python
+pp = brly.get_performance_profiles(
+    cnn_final,
+    tau_values=np.linspace(0, 12, 101),
+    metric_col="hns",
+    task_col="rom",
+    group_cols=["agent"],
+)
+```
+
+<img src="img/performance_profiles.png" alt="Performance Profiles" width="60%"/>
+
+*Performance profiles allows for visualizing the fraction of tasks for which an algorithm achieves a normalized score at least equal to a threshold τ. This provides a comprehensive view of algorithm performance across the entire range of possible scores, capturing both the average performance and the robustness of an algorithm across tasks.*
+
+
+
 ### supervised learning
 
 `beaRLy` is not restricted to evaluating RL algorithms! Whenever you have a fairly stochastic algorithm you want to evaluate in aggregate over a distribution of tasks, you can use the same tools: 
@@ -125,7 +148,7 @@ df = pd.read_csv("not_rl_results.csv")
 
 ci = bearly.get_interval_estimates(
     df,
-    stats,
+    ("median", bearly.median),
     metric_col="val_acc",
     task_col="dataset",
     group_cols=["model", "epoch"],

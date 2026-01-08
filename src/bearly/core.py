@@ -1,23 +1,23 @@
-from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from .stat import AggregateStat, PairedStat, Tasks
+from .stat import (
+    AggregateStat,
+    BootAggregate,
+    PairedStat,
+    R,
+    Tasks,
+    set_performance_at_tau_stat,
+)
 
 __all__ = (
     "get_interval_estimates",
     "get_paired_interval_estimates",
-    # "stratified_sampling_with_replacement",
+    "get_performance_profiles",
 )
-
-
-@dataclass(slots=True)
-class BootAggregate:
-    point_estimate: float
-    ci_lower: float
-    ci_upper: float
 
 
 def _generate_stratified_bootstrap(data: Tasks, rng: np.random.Generator) -> Tasks:
@@ -32,7 +32,7 @@ def _generate_stratified_bootstrap(data: Tasks, rng: np.random.Generator) -> Tas
 
 def _compute_interval_estimates(
     data: Tasks,
-    metric_fn: AggregateStat,
+    metric_fn: AggregateStat[R],
     n_samples: int = 2000,
     confidence: float = 0.95,
 ) -> BootAggregate:
@@ -44,8 +44,8 @@ def _compute_interval_estimates(
     )
 
     alpha = (1.0 - confidence) / 2.0
-    lower = np.quantile(boot_estimates, alpha)
-    upper = np.quantile(boot_estimates, 1.0 - alpha)
+    lower = np.quantile(boot_estimates, alpha, axis=0)
+    upper = np.quantile(boot_estimates, 1.0 - alpha, axis=0)
 
     point_estimate = metric_fn(data)
 
@@ -54,7 +54,7 @@ def _compute_interval_estimates(
 
 def get_interval_estimates(
     df: pd.DataFrame,
-    stat: AggregateStat | tuple["str", AggregateStat],
+    stat: AggregateStat[R] | tuple["str", AggregateStat[R]],
     metric_col: str,
     task_col: str,
     group_cols: list[str],
@@ -248,3 +248,71 @@ def get_paired_interval_estimates(
             "stat_fn": [fname],
         }
     )
+
+
+def get_performance_profiles(
+    df: pd.DataFrame,
+    tau_values: np.ndarray | None,
+    metric_col: str,
+    task_col: str,
+    group_cols: list[str],
+    deviation: Literal["run_score", "mean_score"] = "run_score",
+    n_samples: int = 2000,
+    confidence: float = 0.95,
+) -> pd.DataFrame:
+    """Compute performance profiles over aggregates of tasks for each group.
+
+    Performance profiles allows for visualising the fraction of tasks for which
+    an algorithm achieves a normalized score at least equal to a threshold τ.
+    This provides a comprehensive view of algorithm performance across the
+    entire range of possible scores, capturing both the average performance and
+    the robustness of an algorithm across tasks.
+
+    Args:
+        df: tabular data containing benchmark results with columns:
+            - algorithms such as agents or models,
+            - tasks such as games or datasets,
+            - normalized values such as accuracy, returns, etc.
+            Optionally, it can also contain columns such as:
+            - ticks, such as steps or epochs
+            - hyperparameters over which to group by
+        tau_values: array of normalized score thresholds (τ) to evaluate performance
+            at. If None, defaults to 101 evenly spaced values from 0 to 1.
+        metric_col: column name containing the normalized scores (e.g., hns,
+            val_acc, etc.).
+        task_col: column name containing the task identifiers (e.g., game,
+            dataset, etc.).
+        group_cols: list of column names over which we want to apply this function
+            independently, e.g., [agent, step] or [model, epoch].
+        n_samples: number of bootstrap samples to use for confidence interval
+            estimation (default: 2000).
+        confidence: confidence level for the intervals (default: 0.95).
+
+    Returns:
+        DataFrame: containing columns [group_cols..., tau, y, ymin, ymax]
+            - group_cols: the grouping columns from the input
+            - tau: the normalized score threshold
+            - y: the fraction of tasks achieving at least τ score
+            - ymin, ymax: lower and upper confidence bounds for y
+    """
+    tau_values = np.linspace(0, 1.0, 101) if tau_values is None else tau_values
+    stat = set_performance_at_tau_stat(tau_values, deviation)
+
+    # y, ymin, ymax are lists now, one value for each tau
+    pp = get_interval_estimates(
+        df,
+        ("pp", stat),
+        metric_col,
+        task_col,
+        group_cols,
+        n_samples,
+        confidence,
+    )
+    # add tau as column
+    pp["tau"] = [tau_values] * len(pp)
+    # explode the lists to one value per row
+    pp = pp.explode(["y", "ymin", "ymax", "tau"])
+    # somehow these columns end up with dtype object (because of the numpy arrays)
+    pp[["y", "ymin", "ymax", "tau"]] = pp[["y", "ymin", "ymax", "tau"]].astype(float)
+
+    return pp

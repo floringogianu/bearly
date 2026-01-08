@@ -27,6 +27,7 @@ dev = [
     "ruff>=0.14.10",
     "marimo[lsp]>=0.18.4",
     "nodejs-bin[cmd]>=18.4.0a4",
+    "ipython>=9.9.0",
 ]
 
 [build-system]

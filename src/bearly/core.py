@@ -100,6 +100,10 @@ def get_interval_estimates(
     fname, stat = stat if isinstance(stat, tuple) else (stat.__name__, stat)
     results = []
 
+    # rows with a missing task or metric value cannot take part in the bootstrap
+    # and would silently corrupt NaN-sensitive stat functions (e.g. trim_mean).
+    df = df.dropna(subset=[task_col, metric_col])
+
     # group by the high-level identifiers (e.g., algorithm, checkpoint)
     grouped = df.groupby(group_cols, dropna=False)
 

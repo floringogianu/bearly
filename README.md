@@ -43,7 +43,6 @@ Metrics:
 | `iqm` | Inter‑quartile mean (robust average) |
 | `mean` | Average of task averages |
 | `median` | Median of task averages |
-| `iqm` | Inter‑quartile mean (robust average) |
 | `optimality_gap` | Quantify how far a set of scores is from the ceiling |
 
 ### missing:

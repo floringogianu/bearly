@@ -101,7 +101,7 @@ def get_interval_estimates(
     results = []
 
     # group by the high-level identifiers (e.g., algorithm, checkpoint)
-    grouped = df.groupby(group_cols)
+    grouped = df.groupby(group_cols, dropna=False)
 
     for group_keys, sub_df in tqdm(grouped, f"{fname:<16s}"):
         # handle single vs multiple group columns

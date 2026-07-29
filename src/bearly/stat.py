@@ -9,6 +9,7 @@ from typing import Annotated, Generic, Literal, Protocol, TypeVar, runtime_check
 
 import numpy as np
 from scipy.stats import mannwhitneyu, trim_mean
+import warnings
 
 __all__ = (
     "iqm",
@@ -80,9 +81,9 @@ def probability_of_improvement(baseline: Tasks, Y: Tasks) -> float:
 
     for runs_base, runs_Y in zip(baseline, Y):
         rb0, rn0 = len(runs_base) == 0, len(runs_Y) == 0
-        if rn0 or rn0:
+        if rb0 or rn0:
             faulty = "both" if rb0 and rn0 else "baseline" if rb0 else "Y"
-            print(f"warn: {faulty} tasks have 0 runs")
+            warnings.warn(f"{faulty} tasks have 0 runs", RuntimeWarning)
             continue
 
         if np.array_equal(runs_base, runs_Y):

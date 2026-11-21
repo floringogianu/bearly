@@ -36,6 +36,10 @@ uv pip install git+https://github.com/floringogianu/bearly.git#[dev]
 | `get_paired_interval_estimates` | Estimate the probability that one algorithm beats another |
 | `performance_profile` | The fraction of tasks that reach performance τ or higher for a range of tau values |
 
+All three estimation functions disable `tqdm` progress bars by default. They
+print status updates at most every 10 seconds and a final completion message to
+stderr instead. Pass `progress=True` to use bars instead.
+
 Metrics:
 
 | Function | Purpose |

@@ -1,3 +1,5 @@
+import sys
+from time import monotonic
 from typing import Literal
 
 import numpy as np
@@ -60,6 +62,7 @@ def get_interval_estimates(
     group_cols: list[str],
     n_samples: int = 2000,
     confidence: float = 0.95,
+    progress: bool = False,
 ) -> pd.DataFrame:
     """Uses stratified sampling over tasks to compute aggregates and confidence
     intervals using variouse statistical estimates.
@@ -94,6 +97,9 @@ def get_interval_estimates(
         n_samples:  how many times we apply the procedure of sampling measurements of tasks.
         confidence: confidence interval value
 
+        progress: whether to display tqdm progress bars. When False, prints
+            periodic status updates and a final completion message (default: False).
+
     Returns:
         DataFrame: containing y, ymin, ymax, stat_fn
     """
@@ -106,8 +112,11 @@ def get_interval_estimates(
 
     # group by the high-level identifiers (e.g., algorithm, checkpoint)
     grouped = df.groupby(group_cols, dropna=False)
+    last_status = monotonic()
 
-    for group_keys, sub_df in tqdm(grouped, f"{fname:<16s}"):
+    for group_index, (group_keys, sub_df) in enumerate(
+        tqdm(grouped, f"{fname:<16s}", disable=not progress), start=1
+    ):
         # handle single vs multiple group columns
         if not isinstance(group_keys, tuple):
             group_keys = (group_keys,)
@@ -136,6 +145,19 @@ def get_interval_estimates(
             }
         )
         results.append(row)
+        if not progress:
+            now = monotonic()
+            if group_index == len(grouped) or now - last_status >= 10:
+                group_label = ", ".join(
+                    f"{col}={value}" for col, value in zip(group_cols, group_keys)
+                )
+                print(
+                    f"Processed {group_index}/{len(grouped)} groups "
+                    f"(latest: {group_label})",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                last_status = now
 
     return pd.DataFrame(results)
 
@@ -147,6 +169,7 @@ def _compute_paired_estimates(
     n_samples: int = 2000,
     confidence: float = 0.95,
     pair_name: str = "",
+    progress: bool = False,
 ) -> BootAggregate:
     """Compute estimate on paired identifiers, such as two algorithms using a
     paired aggregation function. For example, the probability of improvement.
@@ -154,8 +177,12 @@ def _compute_paired_estimates(
     rng = np.random.default_rng()
 
     estimates = []
+    comparison = pair_name or "paired comparison"
+    last_status = monotonic()
 
-    for _ in tqdm(range(n_samples), f"{pair_name:<16s}"):
+    for sample_index, _ in enumerate(
+        tqdm(range(n_samples), f"{pair_name:<16s}", disable=not progress), start=1
+    ):
         # generate independent new bootstrap samples for both
         # TODO: think wether we would want to have the same indices for paired
         # seeds.
@@ -164,6 +191,16 @@ def _compute_paired_estimates(
 
         # compute the stat on the resampled pair
         estimates.append(stat_fn(boot_base, boot_new))
+        if not progress:
+            now = monotonic()
+            if sample_index == n_samples or now - last_status >= 10:
+                print(
+                    f"Processed {comparison}: {sample_index}/{n_samples} "
+                    "bootstrap samples",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                last_status = now
 
     # percentiles
     boot_estimates = np.array(estimates)
@@ -184,6 +221,7 @@ def get_paired_interval_estimates(
     stat: PairedStat | tuple["str", PairedStat],
     n_samples: int = 2000,
     confidence: float = 0.95,
+    progress: bool = False,
 ) -> pd.DataFrame:
     """Uses stratified sampling to compute probability of improvement of two
     algorithms.
@@ -199,6 +237,9 @@ def get_paired_interval_estimates(
             algorithms compared, eg.: (algo, quicksort, bubblesort)
         task_col: column of tasks
         metric_col: column of values for which we compute the stats
+
+        progress: whether to display tqdm progress bars. When False, prints
+            periodic status updates and a final completion message (default: False).
 
     Returns:
         DataFrame: containing columns [pair, y, ymin, ymax]
@@ -240,6 +281,7 @@ def get_paired_interval_estimates(
         n_samples=n_samples,
         confidence=confidence,
         pair_name=f"p({other_algo} > {baseline_algo})",
+        progress=progress,
     )
 
     return pd.DataFrame(
@@ -263,6 +305,7 @@ def get_performance_profiles(
     deviation: Literal["run_score", "mean_score"] = "run_score",
     n_samples: int = 2000,
     confidence: float = 0.95,
+    progress: bool = False,
 ) -> pd.DataFrame:
     """Compute performance profiles over aggregates of tasks for each group.
 
@@ -292,6 +335,9 @@ def get_performance_profiles(
             estimation (default: 2000).
         confidence: confidence level for the intervals (default: 0.95).
 
+        progress: whether to display tqdm progress bars. When False, prints
+            periodic status updates and a final completion message (default: False).
+
     Returns:
         DataFrame: containing columns [group_cols..., tau, y, ymin, ymax]
             - group_cols: the grouping columns from the input
@@ -311,6 +357,7 @@ def get_performance_profiles(
         group_cols,
         n_samples,
         confidence,
+        progress=progress,
     )
     # add tau as column
     pp["tau"] = [tau_values] * len(pp)

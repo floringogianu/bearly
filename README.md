@@ -169,6 +169,26 @@ p_resnet_vs_lenet = bearly.get_paired_interval_estimates(
 )
 ```
 
+## committing and releasing
+
+Stage your changes and use Commitizen to create a [Conventional Commit](https://www.conventionalcommits.org/):
+
+```bash
+uv run cz commit
+```
+
+Pushing to `main` runs the release workflow automatically. `fix` commits create
+patch releases, `feat` commits create minor releases, and commits marked with
+`!` or a `BREAKING CHANGE` footer create major releases. Other commit types do
+not trigger a release. Each release updates the package version and
+`CHANGELOG.md`, creates a `vX.Y.Z` tag, and publishes GitHub release notes.
+
+To preview the next release locally without changing files:
+
+```bash
+uv run cz bump --dry-run --yes --changelog
+```
+
 ## credits
 - [rliable](https://github.com/google-research/rliable) – original statistical framework for RL evaluation.
 - [plotnine](https://github.com/has2k1/plotnine) – ggplot‑style charting for Python.

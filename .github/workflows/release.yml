@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Bump version and publish release
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'bump:')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump version and changelog
+        id: commitizen
+        uses: commitizen-tools/commitizen-action@0.27.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          commitizen_version: 4.20.1
+          changelog_increment_filename: release_notes.md
+
+      - name: Publish GitHub release
+        if: steps.commitizen.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release create "v${{ steps.commitizen.outputs.version }}"
+          --title "v${{ steps.commitizen.outputs.version }}"
+          --notes-file release_notes.md
+          --verify-tag

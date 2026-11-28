@@ -29,8 +29,28 @@ dev = [
     "marimo[lsp]>=0.18.4",
     "nodejs-bin[cmd]>=18.4.0a4",
     "ipython>=9.9.0",
+    "commitizen>=4.20.1",
 ]
 
 [build-system]
 requires = ["uv_build>=0.9.2,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "uv"
+version_scheme = "semver2"
+tag_format = "v$version"
+update_changelog_on_bump = true
+annotated_tag = true
+bump_message = "bump: version $current_version → $new_version [skip ci]"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+markers = [
+    "slow: end-to-end tests hitting the bundled Atari data (~1 min)",
+]

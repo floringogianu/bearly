@@ -17,8 +17,6 @@ def _():
     import bearly as brly
     return brly, mo, np, p9, partial, pd, trim_mean
 
-    return brly, mo, np, p9, partial, pd, trim_mean
-
 
 @app.cell
 def _(p9):
@@ -31,7 +29,7 @@ def _(brly, pd):
     mnmx = pd.read_csv("./data/ale_57_mnmx.csv", thousands=",").set_index("rom")
     mnmx = mnmx.rename(columns={"mn": "min", "mx": "max"})
 
-    dpmn = pd.read_feather("./data/dopamine.feather.lz4")
+    dpmn = pd.read_feather("./data/dopamine_demo.feather.lz4")
     dpmn = dpmn.loc[dpmn["rom"].isin(mnmx.index.unique())].reset_index(drop=True)
 
     dpmn["hns"] = brly.min_max_normalisation(dpmn, mnmx, "rom", "return")
@@ -243,6 +241,7 @@ def _(p9, pis):
             x="algorithm Y",
             y="p(Y > DQN)",
             subtitle="probability of improvement over DQN",
+        )
     )
 
     probability_of_improvement.save("./img/probability_of_improvement.png", dpi=320)

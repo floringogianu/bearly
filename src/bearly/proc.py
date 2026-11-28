@@ -1,17 +1,6 @@
-from functools import partial
-
 from pandas import DataFrame, Series
 
 __all__ = ("min_max_normalisation",)
-
-
-def _min_max_normalisation(
-    df: DataFrame, mnmx: DataFrame, col: str, metric: str
-) -> Series:
-    col_val = df[col].unique()
-    assert len(col_val) == 1, f"there should be just one `{col}`"
-    mx, mn = (mnmx.at[col_val[0], b] for b in ("max", "min"))
-    return (df[metric] - mn) / (mx - mn)
 
 
 def min_max_normalisation(
@@ -47,10 +36,11 @@ def min_max_normalisation(
         f" {vals_in_df - idxs_in_min_max} missing from `df`."
     )
 
-    res = (
-        df.groupby([col], observed=True)[[col, metric]]
-        .apply(partial(_min_max_normalisation, mnmx=min_max, col=col, metric=metric))
-        .reset_index(level=0)[metric]
-    )
+    # map is vectorized, preserves row order, and returns a Series for any
+    # group shape (unlike groupby-apply, which changes its output layout with
+    # equal vs unequal group sizes).
+    mn = df[col].map(min_max["min"])
+    mx = df[col].map(min_max["max"])
+    res = ((df[metric] - mn) / (mx - mn)).rename(metric)
     assert isinstance(res, Series), f"The result should be a pandas.Series: {res}"
     return res

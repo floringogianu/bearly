@@ -3,13 +3,13 @@ where g an h can be the same function or the function is applied to all runs x
 tasks measurements.
 """
 
+import warnings
 from dataclasses import dataclass
 from functools import partial
 from typing import Annotated, Generic, Literal, Protocol, TypeVar, runtime_checkable
 
 import numpy as np
 from scipy.stats import mannwhitneyu, trim_mean
-import warnings
 
 __all__ = (
     "iqm",
@@ -118,7 +118,7 @@ def set_performance_at_tau_stat(
 
     def _mean_score_deviation(data: Tasks, tau: float) -> float:
         """Average of how many task averages are above τ."""
-        task_scores = np.concatenate([np.mean(task) for task in data])
+        task_scores = np.array([np.mean(task) for task in data])
         return np.mean(task_scores > tau)
 
     if deviation == "run_score":

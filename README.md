@@ -189,6 +189,20 @@ To preview the next release locally without changing files:
 uv run cz bump --dry-run --yes --changelog
 ```
 
+## testing
+
+```bash
+uv run pytest            # full suite (~10 s)
+uv run pytest -m "not slow"   # skip the real-data integration tests
+```
+
+The suite (pytest + pytest-sugar) checks every aggregate metric for parity
+against the installed `rliable` package, hand-computed oracles for edge cases
+(uneven runs per task, ties, NaNs, single-run/single-task groups, task
+misalignment in paired estimates), and runs the README scenarios end-to-end on
+the bundled Atari data. Seeded re-implementations of rliable's stratified and
+independent bootstrap CIs live in `tests/reference/` as oracles.
+
 ## credits
 - [rliable](https://github.com/google-research/rliable) – original statistical framework for RL evaluation.
 - [plotnine](https://github.com/has2k1/plotnine) – ggplot‑style charting for Python.

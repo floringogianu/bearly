@@ -29,6 +29,9 @@ dev = [
     "marimo[lsp]>=0.18.4",
     "nodejs-bin[cmd]>=18.4.0a4",
     "ipython>=9.9.0",
+    "rliable>=1.2.0",
+    "pytest>=9.1.1",
+    "pytest-sugar>=1.1.1",
     "commitizen>=4.20.1",
 ]
 
